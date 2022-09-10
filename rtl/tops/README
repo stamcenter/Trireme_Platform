@@ -1,0 +1,54 @@
+Top Modules
+
+Top level designs in The Trireme Platform implement a whole processor system
+with a RISC-V CPU and memory sybsystem. A description of each top module is
+below. Test benches for each top module are appended with the name of the test
+program the simulate.
+
+Single Cycle Top Module
+The Single Cycle Top Module instantiates the RV32I single cycle core, the
+memory interface, and the single cycle memory subsystem. It represents a
+complete processor environment.
+
+Single Cycle Top Module with BRAM
+The Single Cycle Top Module with BRAM (single_cycle_BRAM_top) instantiates the
+RV32I single cycle core, the memory interface, and the dual port BRAM memory
+subsystem. This top module is the easiest to simulate and synthesize on an FPGA.
+
+Single Cycle Top Module with Cache
+The Single Cycle Top Module with Cache (single_cycle_cache_top) instantiates
+the RV32I single cycle core, the memory interface, the cache hierarchy, the
+main memory interface, and the main memory.
+
+Five Stage Top Module
+The Five Stage Top Module instantiates the RV32I five stage core, the memory
+interface, and the single cycle memory subsystem.
+
+Five Stage Top Module with BRAM
+The Five Stage Top Module with BRAM (five_stage_BRAM_top”) instantiates the
+RV32I five stage core, the memory interface, and the dual port BRAM memory
+subsystem.
+
+Five Stage Top Module with Cache
+The Five Stage Top Module with Cache (five_stage_cache_top) instantiates the
+RV32I five stage core, the memory interface, the cache hierarchy, the main
+memory interface, and the main memory.
+
+Seven Stage Top Module with BRAM
+The Seven Stage Top Module with BRAM (seven_stage_BRAM_top) instantiates the
+seven stage core, the memory interface, and the dual port BRAM memory
+subsystem. This version of the seven stage core supports both RV32I and RV64I.
+
+Seven Stage Top Module with Cache
+The Seven Stage Top Module with Cache (seven_stage_cache_top) instantiates the
+seven stage core, the memory interface, the cache hierarchy, the main memory
+interface, and the main memory.
+
+Multi-Core Seven Stage with Cache
+This top module is similar to seven_stage_cache_top, but supports four seven
+stage RV32I CPU cores instead of jsut one.
+
+Seven Stage Privileged Top Module with BRAM
+This top module uses the RV64IM privileged version of the seven stage core.
+The top module inclueds a UART and memory mapped registers required by the
+privilege specification.
