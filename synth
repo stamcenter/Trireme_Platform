@@ -1,0 +1,52 @@
+#!/bin/sh
+
+# Check that Quartus binaries are in the path
+hash quartus_map 2>/dev/null || {
+  echo >&2 "The Quartus quartus_map binary was not found in the PATH";
+  echo >&2 "";
+  echo >&2 "The quartus_map binary must be in the PATH to generate a project with";
+  echo >&2 "this script. By default the Quartus quartus_map binary is installed";
+  echo >&2 "somewhere like the following:";
+  echo >&2 "~/intelFPGA_lite/18.1/quartus/bin";
+  echo >&2 "~/altera/15.0/quartus/bin";
+  exit 1;
+}
+
+hash quartus_fit 2>/dev/null || {
+  echo >&2 "The Quartus quartus_fit binary was not found in the PATH";
+  echo >&2 "";
+  echo >&2 "The quartus_fit binary must be in the PATH to generate a project with";
+  echo >&2 "this script. By default the Quartus quartus_fit binary is installed";
+  echo >&2 "somewhere like the following:";
+  echo >&2 "~/intelFPGA_lite/18.1/quartus/bin";
+  echo >&2 "~/altera/15.0/quartus/bin";
+  exit 1;
+}
+
+hash quartus_asm 2>/dev/null || {
+  echo >&2 "The Quartus quartus_asm binary was not found in the PATH";
+  echo >&2 "";
+  echo >&2 "The quartus_asm binary must be in the PATH to generate a project with";
+  echo >&2 "this script. By default the Quartus quartus_asm binary is installed";
+  echo >&2 "somewhere like the following:";
+  echo >&2 "~/intelFPGA_lite/18.1/quartus/bin";
+  echo >&2 "~/altera/15.0/quartus/bin";
+  exit 1;
+}
+
+hash quartus_sta 2>/dev/null || {
+  echo >&2 "The Quartus quartus_sta binary was not found in the PATH";
+  echo >&2 "";
+  echo >&2 "The quartus_sta binary must be in the PATH to generate a project with";
+  echo >&2 "this script. By default the Quartus quartus_sta binary is installed";
+  echo >&2 "somewhere like the following:";
+  echo >&2 "~/intelFPGA_lite/18.1/quartus/bin";
+  echo >&2 "~/altera/15.0/quartus/bin";
+  exit 1;
+}
+
+PROJECT=trireme_example
+quartus_map $PROJECT
+quartus_fit $PROJECT
+quartus_asm $PROJECT
+quartus_sta $PROJECT
