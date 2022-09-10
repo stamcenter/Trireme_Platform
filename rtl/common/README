@@ -1,0 +1,4 @@
+Common Modules
+
+These modules are used in more than one of the other major subsystems of the
+Trireme Platform (cores, cache, memory, and I/O).
