@@ -1,0 +1,66 @@
+#!/bin/bash
+
+#   @module : run_test
+#   @author : Secure, Trusted, and Assured Microelectronics (STAM) Center
+
+#   Copyright (c) 2022 Trireme (STAM/SCAI/ASU)
+#   Permission is hereby granted, free of charge, to any person obtaining a copy
+#   of this software and associated documentation files (the "Software"), to deal
+#   in the Software without restriction, including without limitation the rights
+#   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#   copies of the Software, and to permit persons to whom the Software is
+#   furnished to do so, subject to the following conditions:
+#   The above copyright notice and this permission notice shall be included in
+#   all copies or substantial portions of the Software.
+
+#   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+#   THE SOFTWARE.
+
+# Check that VSIM is in the path
+hash vsim 2>/dev/null || {
+  echo >&2 "The Modelsim vsim binary was not found in the PATH";
+  echo >&2 "";
+  echo >&2 "The vsim binary must be in the PATH to run testbenches. By default";
+  echo >&2 "Modelsim's vsim binary is instaled somwerhe like the following:";
+  echo >&2 "~/intelFPGA_lite/18.1/modelsim_ase/bin";
+  echo >&2 "~/altera/15.0/modelsim_ase/bin";
+  exit 1;
+}
+
+
+# The modelsim vsim executable path. Uncomment and change one of these lines
+# and comment out the check above if you do not wish to add Modelsim to your
+# PATH variable.
+#VSIM=~/intelFPGA_lite/18.1/modelsim_ase/linuxaloem/vsim # the one Quartus uses
+#VSIM=~/intelFPGA_lite/18.1/modelsim_ase/bin/vsim
+#VSIM=~/altera/15.0/modelsim_ase/bin/vsim
+
+#Assume vsim is in the PATH
+VSIM=vsim
+
+# Add multiple test benches, one per commandline argument
+TESTBENCHES=$@
+
+# Clean up old library
+rm -rf work 2&>/dev/null
+
+# Load Design
+#$VSIM -batch -do "source load.do; quit"
+$VSIM -batch -do load.do
+# inlude any extra libraries needed in the braces after the -L, seperate with commas
+for i in ${TESTBENCHES[@]}; do
+  # print blank lines for clarity
+  echo -e '\n\n'
+
+  # use this line for jsut one library
+  $VSIM -voptargs=+acc -batch -quiet $i -do "run -all; quit"  -L 220model_ver $LIBRARY
+
+  # Uncomment and add extra libraries in the braces with no spaces. Comment out line above
+  #$VSIM -batch $i -do "run -all; quit"  -L\ {220model_ver,<NEW_LIBRARY_HERE>}
+
+done
