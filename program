@@ -1,0 +1,3 @@
+#! /usr/bin/env bash
+
+quartus_pgm -c "DE5 Standard [4-3]" -m jtag -o "P;output_files/trireme_example.sof"

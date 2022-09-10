@@ -1,0 +1,66 @@
+FPGA Example
+
+We do not distribute example Quartus projects to avoid violations of the
+software license agreement. However, we do provide a synthesis script to
+synthesize a design once the Quartus project has been set up. The following
+steps describe the process of setting up a quartus project for the Trireme
+platform. These steps assume you are comfortable using Quartus.
+
+
+Step 1.
+- Create a blank quartus project in this directory named trireme_example.
+- Add all of the source files in the rtl directory to the project.
+
+Step 2.
+- Be sure the project is targeting the correct FPGA device.
+- Create an FPGA-specific top module that instantiates on of the example processor
+  systems in rtl/tops/src. The single_cycle_BRAM_top is a simple example to start
+  with.
+- In the FPGA specific top module, instantiate and FPGA specific IP, such as
+  PLLs or memory controllers.
+
+Step 3.
+- Make sure to set the FPGA-specific top module as the projects top-level entity.
+
+Step 4.
+- Run the provided synthesis script: ./synth
+- The script will generate the bit-stream and systhesis reports and write them
+  to an output_files directory. This is just like the Quartus GUI functionality.
+
+Step 5.
+- Connect your FPGA to your workstation.
+- Run "quartus_pgm -l" to determine the name of the FPGA programming chain.
+- You will see an output similar to the following
+
+Info: *******************************************************************
+Info: Running Quartus II 64-Bit Programmer
+    Info: Version 15.0.0 Build 145 04/22/2015 SJ Full Version
+    Info: Copyright (C) 1991-2015 Altera Corporation. All rights reserved.
+    Info: Your use of Altera Corporation's design tools, logic functions
+    Info: and other software and tools, and its AMPP partner logic
+    Info: functions, and any output files from any of the foregoing
+    Info: (including device programming or simulation files), and any
+    Info: associated documentation or information are expressly subject
+    Info: to the terms and conditions of the Altera Program License
+    Info: Subscription Agreement, the Altera Quartus II License Agreement,
+    Info: the Altera MegaCore Function License Agreement, or other
+    Info: applicable license agreement, including, without limitation,
+    Info: that your use is for the sole purpose of programming logic
+    Info: devices manufactured by Altera and sold by Altera or its
+    Info: authorized distributors.  Please refer to the applicable
+    Info: agreement for further details.
+    Info: Processing started: Sun Sep  4 16:54:20 2022
+Info: Command: quartus_pgm -l
+1) DE5 Standard [4-3]
+Info: Quartus II 64-Bit Programmer was successful. 0 errors, 0 warnings
+    Info: Peak virtual memory: 340 megabytes
+    Info: Processing ended: Sun Sep  4 16:54:23 2022
+    Info: Elapsed time: 00:00:03
+    Info: Total CPU time (on all processors): 00:00:00
+
+Step 6.
+- Edit the program script with the correct chain name for your system.
+- In the example above, the chain name is "DE5 Standard [4-3]"
+- Run the program script to configure the FPGA with your synthesized bit stream:
+  "./program"
+
