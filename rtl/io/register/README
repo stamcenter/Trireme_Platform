@@ -1,0 +1,4 @@
+Memory Mapped Register
+
+This module provides a simple memory mapped register useful LED output or the
+privileged specification's supervisor timer interrupt.

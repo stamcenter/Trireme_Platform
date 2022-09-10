@@ -1,0 +1,6 @@
+UART
+
+This UART supports 8n1 data transmit and receive at a configurable bit rate.
+BIT rates up to 1M bits/second have been tested. The clock ticks per UART-bit
+is calculated with a CLOCK_FREQUENCY and BAUD_RATE parameter. FIFOs are
+included to buffer messages. The FIFO depth is configurable with a parameter.

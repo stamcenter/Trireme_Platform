@@ -1,0 +1,5 @@
+Includes
+
+This directory is for header files shared among multiple modules.
+Currently, the only header file needed is the params.h file that defines bus
+messages for the cache hierarchy.

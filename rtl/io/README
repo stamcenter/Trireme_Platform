@@ -1,0 +1,4 @@
+Input/Output
+
+These modules provide basic I/O and other memory mapped resources, including
+a UART, generic memory mapped register, and a timer.

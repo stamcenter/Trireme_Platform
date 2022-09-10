@@ -1,0 +1,4 @@
+Timer
+
+This module implements the privileged specification's MTIME and MTIMECMP memory
+mapped registers.
