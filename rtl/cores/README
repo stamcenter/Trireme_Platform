@@ -1,0 +1,6 @@
+Core Designs
+
+The sub-directories here include modules dedicated to the Trireme RISC-V CPU
+cores. The "Base" modules are shared among multiple cores and include files
+such as the ALU. The remaining sub-directories include modules unique to each
+type of core, such as specific control units and the core modules themselves.

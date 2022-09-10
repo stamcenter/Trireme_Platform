@@ -1,0 +1,11 @@
+Five Stage Pipelined Core
+
+The core base modules and the five-stage modules here form a pipelined RV32I
+core with five pipeline stages. The Five Stage Core includes Fetch, Decode,
+Execution, Memory, and Writeback stages. Some base modules are wrapped with
+additional logic specific to this five stage core. The fetch and memory stages
+each take a single cycle, i.e the instruction and data memory reads must happen
+combinationally or the core will stall. If BRAM memories or a cache hierarchy
+are used, the core will stall every other cycle while the BRAM or cache is read.
+The seven stage core prevents stalls with an additional pipeline stage between
+ssue and receive stages.

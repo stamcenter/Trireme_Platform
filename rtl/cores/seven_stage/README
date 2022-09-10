@@ -1,0 +1,24 @@
+Seven Stage Core
+
+There are two versions of the seven stage core. The first version implements
+RV32I or RV64I. The second version implements RV64IM with the RISC-V Privilege
+Specification.
+
+The seven stage cores include Fetch Issue, Fetch Receive, Decode, Execution,
+Memory Issue, Memory Receive, and Writeback stages. Some base modules are
+wrapped with additional logic specific to this seven stage core. The fetch and
+memory stages each take two cycles. In the first cycle, the core issues a fetch
+or data memory operation. In the second cycle, the core receives a fetch or
+data memory data if the issued operation was a read. Using two pipeline stages
+allows the core to issue memory operations each cycle, even to memories with a
+one cycle latency, such as BRAMs or L1 cache.
+
+The seven_stage_core module can be configured to implement RV32I or RV64I with
+the DATA_WIDTH parameter. See the tb_seven_stage_BRAM_top_rv64_test.v module for
+an example of an RV64I configuration. See any other seven stage top level test
+bench for an RV32I configuration example.
+
+The seven_stage_priv_core implements the RV64IM ISA with privilege modes. The
+"M" (machine), "S" (supervisor), and "U" (user) modes are supported. The
+seven_stage_priv_BRAM_top test benches provide tests for privilege modes and
+traps.

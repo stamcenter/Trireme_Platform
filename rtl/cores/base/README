@@ -1,0 +1,6 @@
+Base Modules
+
+The base core modules are not specific to a single core design and are shared
+among more than one type of core. Moduls for fetch, decode, execute, memory,
+and writeback stages are included here. The base directory also includes the
+ALU and register file, in addition to other shared modules.

@@ -1,0 +1,7 @@
+Single Cycle Core
+
+The single cycle core is the simplest core. It combines the base fetch, decode,
+execute, memory, and writeback modules to form an RV32I CPU core that executes
+instructions in a single cycle. Memory reads must be asynchronous (see the
+single_cycle_memory_subsystem module) to prevent stalls. Using the BRAM or
+cache hierarchy means the core will stall while the synchronous memory is read.
