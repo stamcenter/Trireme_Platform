@@ -1,0 +1,19 @@
+Dual Port BRAM Memory
+
+The dual port BRAM memory modules provides a single, synchronous FPGA BRAM
+memory for instruction and data. It is compatible with every RISC-V core, but
+single-cycle and five-stage versions will stall during the synchronous memory
+reads.
+
+FPGA synthesis allows BRAMs to be initialized with specific memory contents.
+However, to create a portable BRAM with the per-byte write enables required for
+the different RISC-V store sizes, a dedicated BRAM is used for each byte of the
+memory word. In other words, a 32-bit dual port BRAM subsystem includes four
+BRAM submodules. These submodules must be initialized seperately.
+
+The INIT_FILE_BASE parameter takes an input file name and adds the byte-index
+to the beginning. For example, gcd.vmh becomes 0gcd.vmh, 1gcd.vmh, 2gcd.vmh, and
+3gcd.vmh. A helper script is provided to convert .vmh files output by the
+trireme_gcd compiler_wrapper into the byte-wise files that start with the byte
+index. The script is located in trireme/software/helper_scripts/vmh_byte_split.py
+

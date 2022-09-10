@@ -1,0 +1,6 @@
+L1 Cache
+
+The L1 cache provides data and instruction memory on a per core basis for each
+core. These caches are connected to higher level caches by buses. The L1 cache
+supports configurable line size, number of indexes and number of ways.
+

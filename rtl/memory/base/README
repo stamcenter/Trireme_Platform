@@ -1,0 +1,5 @@
+Base Memory
+
+The memory hierarchy of the Trireme Platform is modular in design. This allows
+for a substantial amount of module reuse. The base memory directory includes
+modules common to more than one memory hierarchy.

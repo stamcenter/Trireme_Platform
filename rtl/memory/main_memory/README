@@ -1,0 +1,8 @@
+Main Memory
+
+The main_memory module provides a synchronus BRAM memory that is compatible with
+the cache hierarchy. Because it iterfaces with the cache hierarchy, instead of
+a CPU core, it does not need to support writes to arbitrary bytes in a word of
+memory. Therefor, it supports memory initialization with a simple PROGRAM
+parameter, instead of the bite-wise split memory files required by the dual port
+BRAM memory subsystem.

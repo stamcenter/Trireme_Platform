@@ -1,0 +1,9 @@
+Cache Hierarchies
+
+The hierarchies wrap L1 and Lx cache modules to create a single hierarchy that
+interfaces with CPUs and main memory.
+
+Currently only configurations for a two-level coherent cache hierarchy is
+included. The two level cache hierarchy provides coherent memory to one or more
+CPU cores. Two L1 caches per core communicate with the L2 cache through a single
+bus.

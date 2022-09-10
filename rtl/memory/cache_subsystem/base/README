@@ -1,0 +1,4 @@
+Base Cache
+
+These modules are shared between the L1 and Lx caches. Cache memory and
+replacement controllers are included here.

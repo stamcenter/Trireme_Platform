@@ -1,0 +1,11 @@
+Memory
+
+These subdirectories provide the different memory subsystems of the Trireme
+Platform. The base directory includes modules, such as BRAMs, that are shared
+among more than one memory subsystem. The single_cycle_memory directory provides
+the asynchronous main-memory needed for the single-cycle and five-stage cores
+to fetch instructions without stalling. The dual_port_BRAM_memory provides
+a synchronous FPGA BRAM main memory. The main_memory directory provides a
+synchronous main memory compatible with the cache hierarchy, which is in the
+cache_subsystem directory.
+

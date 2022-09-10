@@ -1,0 +1,9 @@
+Lx Cache
+
+The Lx cache modules provide support and connections for L2 and greater caches.
+One side of the Lx cache connects to an L1 cache, or another Lx cache closer
+to the CPU through a coherent bus. The other side of the Lx cache connects to
+main memory or another Lx cache closer to the main memory.
+
+The Lx cache supports configurable line size, number of ways, and number of
+indexes.

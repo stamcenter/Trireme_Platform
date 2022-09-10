@@ -1,0 +1,5 @@
+Single Cycle Memory Subsystem
+
+The single cycle memory subssystem module wraps two asynchronous RAM modules
+(BSRAM.v) to provide instruction and data memory for single-cycle and five-stage
+CPU cores. Data is available the same clock cycle that the read is requested.

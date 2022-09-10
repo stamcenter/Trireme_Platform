@@ -1,0 +1,12 @@
+Cache Subsystem
+
+The trireme platofrm supports a configurable cache hierarchy. Each cahce
+supports a configurable line size, number of ways and number of indexes.
+Hierarchy wrappers can be configured to support an arbitrary number of L1
+caches, enabling multi-core systems.
+
+The base directory includes modules shared among the L1 and Lx cache modules.
+The L1_cache directory includes the L1 cache and associated control modules.
+The Lx_cache directory includes the Lx cahce which is used to implement L2 and
+greater cache modules. The hierarchies directory includes wrappers for complete
+cache hierarchies.
