@@ -1,0 +1,179 @@
+#!/usr/bin/env python3
+
+#   @module : build_bsp
+#   @author : Secure, Trusted, and Assured Microelectronics (STAM) Center
+#
+#   Copyright (c) 2022 Trireme (STAM/SCAI/ASU)
+#   Permission is hereby granted, free of charge, to any person obtaining a copy
+#   of this software and associated documentation files (the "Software"), to deal
+#   in the Software without restriction, including without limitation the rights
+#   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#   copies of the Software, and to permit persons to whom the Software is
+#   furnished to do so, subject to the following conditions:
+#   The above copyright notice and this permission notice shall be included in
+#   all copies or substantial portions of the Software.
+
+#   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+#   THE SOFTWARE.
+
+import os
+import glob
+import argparse
+import subprocess
+
+RISCV_DEFAULT_TOOL_CHAIN_PREFIX = '/opt/riscv'
+
+TRIREME_BSP_PATH = os.path.join(
+    os.path.dirname(
+        os.path.realpath(__file__)
+    ),
+    'bsp'
+)
+
+TRIREME_DEFAULT_LIBRARY_PREFIX = os.path.join(
+    os.path.dirname(
+        os.path.realpath(__file__)
+    ),
+    'lib'
+)
+
+
+def call_program(program_path, program_args, cwd=os.getcwd()):
+    try:
+        return {
+            'success': True,
+            'output': subprocess.check_output(
+                [program_path] + program_args,
+                stderr=subprocess.STDOUT,
+                cwd=cwd
+            ).decode('ascii')
+        }
+    except subprocess.CalledProcessError as e:
+        return {
+            'success': False,
+            'output': e.output.decode('ascii')
+        }
+
+
+def get_list_of_available_bsp():
+    return [x for x in os.listdir(TRIREME_BSP_PATH)]
+
+
+def main(args):
+    if not args['clean']:
+        bsp_path = os.path.join(
+            os.path.dirname(
+                os.path.realpath(__file__)
+            ),
+            'bsp',
+            args['build']
+        )
+        if os.path.exists(bsp_path):
+            print(f'trireme: building board support package "{args["build"]}"')
+            build_result = call_program(
+                program_path='make',
+                program_args=[
+                    f'prefix={args["toolchain_prefix"]}'
+                ],
+                cwd=bsp_path
+            )
+            if not build_result['success']:
+                if build_result['output']:
+                    print(build_result['output'])
+                print(f'trireme: {args["build"]} build failed')
+                return 1
+            print(f'trireme: installing board support package "{args["build"]}"')
+            if not os.path.exists(args['library_prefix']):
+                os.makedirs(args['library_prefix'], exist_ok=True)
+            install_result = call_program(
+                program_path='make',
+                program_args=[
+                    'install',
+                    f'lib_prefix={args["library_prefix"]}',
+                ],
+                cwd=bsp_path
+            )
+            if not install_result['success']:
+                if install_result['output']:
+                    print(install_result['output'])
+                print(f'trireme: install of "{args["build"]}" failed')
+                return 1
+        else:
+            print(f'trireme: cannot build "{args["build"]}"; {bsp_path} does not exist')
+            return 1
+    else:
+        bsp_path = os.path.join(
+            os.path.dirname(
+                os.path.realpath(__file__)
+            ),
+            'bsp',
+            args['clean']
+        )
+        if os.path.exists(bsp_path):
+            print(f'trireme: cleaning Board Support Package "{args["clean"]}". '
+                  f'Note that libraries will NOT be uninstalled!')
+            clean_result = call_program(
+                program_path='make',
+                program_args=[
+                    'clean'
+                ],
+                cwd=bsp_path
+            )
+            if not clean_result['success']:
+                if clean_result['output']:
+                    print(clean_result['output'])
+                print(f'trireme: failed to clean Board Support Package "{args["clean"]}"')
+                return 1
+        else:
+            print(f'trireme: cannot clean build files for "{args["clean"]}"; {bsp_path} does not exist')
+            return 1
+
+
+if __name__ == '__main__':
+    arg_parser = argparse.ArgumentParser(
+        description=(
+            'Builds and installs a TRIREME Board Support Package'
+        )
+    )
+    available_bsp_list = get_list_of_available_bsp()
+    bsp_list_as_str = ', '.join(available_bsp_list) if len(available_bsp_list) > 0 else 'None'
+    arg_group = arg_parser.add_mutually_exclusive_group(required=True)
+    arg_group.add_argument(
+        '--build',
+        help=(
+            'Build and install a TRIREME Board Support Package. '
+            'Argument value is the name of the TRIREME Board Support Package directory '
+            f'Available options: {bsp_list_as_str} '
+        ),
+        metavar='BSP_NAME'
+    )
+    arg_group.add_argument(
+        '--clean',
+        help=(
+            'Clean build files of a Board Support Package specified by its directory name. '
+            f'Available options: {bsp_list_as_str} '
+        ),
+        metavar='BSP_NAME'
+    )
+    arg_parser.add_argument(
+        '--library-prefix',
+        help=(
+            f'Install path for Board Support Package library (default: {TRIREME_DEFAULT_LIBRARY_PREFIX})'
+        ),
+        default=TRIREME_DEFAULT_LIBRARY_PREFIX
+    )
+    arg_parser.add_argument(
+        '--toolchain-prefix',
+        help=(
+            f'Install path of RISC-V toolchain (default: {RISCV_DEFAULT_TOOL_CHAIN_PREFIX})'
+        ),
+        default=RISCV_DEFAULT_TOOL_CHAIN_PREFIX
+    )
+    main(vars(arg_parser.parse_args()))
+
+

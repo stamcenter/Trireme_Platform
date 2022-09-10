@@ -1,0 +1,1245 @@
+#!/usr/bin/env python3
+
+#   @module : trireme_gcc
+#   @author : Secure, Trusted, and Assured Microelectronics (STAM) Center
+#
+#   Copyright (c) 2022 Trireme (STAM/SCAI/ASU)
+#   Permission is hereby granted, free of charge, to any person obtaining a copy
+#   of this software and associated documentation files (the "Software"), to deal
+#   in the Software without restriction, including without limitation the rights
+#   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#   copies of the Software, and to permit persons to whom the Software is
+#   furnished to do so, subject to the following conditions:
+#   The above copyright notice and this permission notice shall be included in
+#   all copies or substantial portions of the Software.
+
+#   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+#   THE SOFTWARE.
+#
+
+
+import os
+import re
+import sys
+import math
+import enum
+import pprint
+import decimal
+import textwrap
+import argparse
+import subprocess
+
+RISCV_TOOL_CHAIN_PREFIX = '/opt/riscv'
+RISCV_TOOL_CHAIN_BINARY_PREFIX = f'{RISCV_TOOL_CHAIN_PREFIX}/bin/riscv32-unknown-elf'
+RISCV_GCC = f'{RISCV_TOOL_CHAIN_BINARY_PREFIX}-gcc'
+RISCV_OBJ_DUMP = f'{RISCV_TOOL_CHAIN_BINARY_PREFIX}-objdump'
+RISCV_OBJCOPY = f'{RISCV_TOOL_CHAIN_BINARY_PREFIX}-objcopy'
+RISCV_SIZE = f'{RISCV_TOOL_CHAIN_BINARY_PREFIX}-size'
+RISCV_NM = f'{RISCV_TOOL_CHAIN_BINARY_PREFIX}-nm'
+LIBGLOSS = 'nosys_trireme32'
+TEMP_BASE_DIRECTORY = os.path.join(
+    '/tmp', '.trireme_gcc'
+)
+INIT_FILE_PATH = os.path.join(TEMP_BASE_DIRECTORY, 'init.s')
+HARTS_FILE_PATH = os.path.join(TEMP_BASE_DIRECTORY, 'harts.s')
+FINI_FILE_PATH = os.path.join(TEMP_BASE_DIRECTORY, 'fini.s')
+ARCH_PARAMS_PATH = os.path.join(TEMP_BASE_DIRECTORY, 'arch_params.s')
+LINKER_SCRIPT_PATH = os.path.join(TEMP_BASE_DIRECTORY, 'linker.ld')
+
+TRIREME_DEFAULT_LIB_PATH = os.path.join(
+    os.path.dirname(
+        os.path.realpath(__file__)
+    ),
+    'lib'
+)
+
+library_fmt_one = re.compile(r'-Wl,-l(?P<library>\w+)')
+library_fmt_two = re.compile(r'--Xlinker\s-(?P<library>\w+)')
+
+GCC_KNOWN_FILE_EXTENSIONS = {'h', '.hpp', 'c', 'i', 'ii', 'cc', 'cp', 'cxx', 'c++', 's', 'S', 'o'}
+
+DEFAULT_ARCH_PARAMS = {
+    'UART_TX_PORT': 0xC0020
+}
+
+APPROX_EQUALS ='\u2248'
+TERMINAL_RED = '\033[31m'
+TERMINAL_GREEN = '\033[32m'
+TERMINAL_YELLOW = '\033[33m'
+TERMINAL_FMT_RESET = '\33[0m'
+NO_IN_RED = f'{TERMINAL_RED}no{TERMINAL_FMT_RESET}'
+NO_IN_GREEN = f'{TERMINAL_GREEN}no{TERMINAL_FMT_RESET}'
+YES_IN_RED = f'{TERMINAL_RED}yes{TERMINAL_FMT_RESET}'
+YES_IN_GREEN = f'{TERMINAL_GREEN}yes{TERMINAL_FMT_RESET}'
+
+HART_ENTRY_POINT_TEMPLATE = '''
+.section .hart_init
+.global hart{hart_id}
+hart{hart_id}:
+    addi    zero,zero,0
+    addi    ra,zero,0
+    li      sp,{stack_address}
+    addi    gp,zero,0
+    addi    tp,zero,0
+    addi    t0,zero,0
+    addi    t1,zero,0
+    addi    t2,zero,0
+    addi    s0,zero,0
+    addi    a0,zero,0
+    addi    a1,zero,0
+    addi    a2,zero,0
+    addi    a3,zero,0
+    addi    a4,zero,0
+    addi    a5,zero,0
+    addi    a6,zero,0
+    addi    a7,zero,0
+    addi    s2,zero,0
+    addi    s3,zero,0
+    addi    s4,zero,0
+    addi    s5,zero,0
+    addi    s6,zero,0
+    addi    s7,zero,0
+    addi    s8,zero,0
+    addi    s9,zero,0
+    addi    s10,zero,0
+    addi    s11,zero,0
+    addi    t3,zero,0
+    addi    t4,zero,0
+    addi    t5,zero,0
+    addi    t6,zero,0
+    call    {entry_point}
+    addi    zero,zero,0
+    mv      s1,a0
+    addi    zero,zero,0
+    addi    zero,zero,0
+    addi    zero,zero,0
+    addi    zero,zero,0
+    auipc   ra,0x0
+    jalr    ra,0(ra)
+    addi    zero,zero,0
+    addi    zero,zero,0
+    addi    zero,zero,0
+    addi    zero,zero,0
+'''
+BACKEND_BLOCK = '''
+.section .fini
+_end:
+    addi    zero,zero,0
+    addi    zero,zero,0
+    addi    zero,zero,0
+    addi    zero,zero,0
+    auipc   ra,0x0
+    jalr    ra,0(ra)
+    addi    zero,zero,0
+    addi    zero,zero,0
+    addi    zero,zero,0
+    addi    zero,zero,0
+'''
+
+LINKER_INIT_SECTION = '''.init           :
+  {{
+    *(.init)
+    *(.hart_init)
+  }} > ram
+  . = SIZEOF(.init);
+  . = ALIGN({data_width} / 8);
+'''
+
+LINKER_FINI_SECTION = '''.fini           :
+  {
+    *(.fini)
+  } > ram
+'''
+
+LINKER_SCRIPT = '''
+OUTPUT_FORMAT("elf32-littleriscv", "elf32-littleriscv",
+	      "elf32-littleriscv")
+OUTPUT_ARCH(riscv)
+ENTRY(_start)
+
+SEARCH_DIR("/opt/riscv/riscv32-unknown-elf/lib");
+SEARCH_DIR("/opt/riscv/lib/gcc/riscv32-unknown-elf/{gcc_version}");
+SEARCH_DIR("{bsp_lib_path}");
+
+MEMORY 
+{{
+	ram (wx)      : ORIGIN = {ram_origin}, LENGTH = {ram_size}
+}}
+
+SECTIONS
+{{
+  {init_section}  .text           :
+  {{
+    *(.text.unlikely .text.*_unlikely .text.unlikely.*)
+    *(.text.exit .text.exit.*)
+    *(.text.startup .text.startup.*)
+    *(.text.hot .text.hot.*)
+    *(.text .stub .text.* .gnu.linkonce.t.*)
+    /* .gnu.warning sections are handled specially by elf32.em.  */
+    *(.gnu.warning)
+  }} > ram
+  {fini_section}  .rodata         : {{ *(.rodata .rodata.* .gnu.linkonce.r.*) }}
+  .rodata1        : {{ *(.rodata1) }}
+  .sdata2         :
+  {{
+    *(.sdata2 .sdata2.* .gnu.linkonce.s2.*)
+  }} > ram
+  .sbss2          : {{ *(.sbss2 .sbss2.* .gnu.linkonce.sb2.*) }}
+  .data           :
+  {{
+    __DATA_BEGIN__ = .;
+    *(.data .data.* .gnu.linkonce.d.*)
+  }} > ram
+  .data1          : {{ *(.data1) }}
+  .sdata          :
+  {{
+    __SDATA_BEGIN__ = .;
+    *(.srodata.cst16) *(.srodata.cst8) *(.srodata.cst4) *(.srodata.cst2) *(.srodata .srodata.*)
+    *(.sdata .sdata.* .gnu.linkonce.s.*)
+  }} > ram
+   __bss_start = .;
+  .sbss           :
+  {{
+    *(.dynsbss)
+    *(.sbss .sbss.* .gnu.linkonce.sb.*)
+    *(.scommon)
+  }} > ram
+  .bss            :
+  {{
+   *(.dynbss)
+   *(.bss .bss.* .gnu.linkonce.b.*)
+   *(COMMON)
+   /* Align here to ensure that the .bss section occupies space up to
+      _end.  Align after .bss to ensure correct alignment even if the
+      .bss section disappears because there are no input sections.
+      FIXME: Why do we need it? When there is no .bss section, we don't
+      pad the .data section.  */
+   . = ALIGN(. != 0 ? {data_width} / 8 : 1);
+  }} > ram
+  . = ALIGN({data_width} / 8);
+  __BSS_END__ = .;
+  _end = .; PROVIDE (end = .);
+  stack_end = . + {heap_size};
+}}
+'''
+
+ASM_CONSTANT_TEMPLATE = '''
+.section .data
+.globl {name}
+.align 2
+{name}: {type} {value}
+'''
+
+DEFAULT_STACK_SIZE = 504
+DEFAULT_STACK_ADDRESS = 2048
+DEFAULT_START_ADDRESS = 0x00
+DEFAULT_MAIN_MEMORY_SIZE = DEFAULT_STACK_ADDRESS
+
+
+class BytesSizeDecimalEnum(enum.Enum):
+    KILOBYTE = 1000
+    MEGABYTE = 1000**2
+    GIGABYTE = 1000**3
+    TERABYTE = 1000**4
+    PETABYTE = 1000**5
+    EXABYTE = 1000**6
+    ZETTABYTE = 1000**7
+    YOTTABYTE = 1000**8
+
+
+class BytesSizeBinaryEnum(enum.Enum):
+    KIBIBYTE = 1024
+    MEBIBYTE = 1024**2
+    GIBIBYTE = 1024**3
+    TEBIBYTE = 1024**4
+    PEBIBYTE = 1024**5
+    EXBIBYTE = 1024**6
+    ZEBIBYTE = 1024**7
+    YOBIBYTE = 1024**8
+
+
+def size_is_approximate(size):
+    float_parts = math.frexp(size)
+    return float_parts[0] > 0.5
+
+
+def get_human_readable_size_str_from_bytes(num_bytes):
+    suffix = ''
+    size_str = 'invalid'
+    if num_bytes < 0:
+        return size_str
+    elif num_bytes < BytesSizeDecimalEnum.KILOBYTE.value:
+        size = num_bytes
+        suffix = 'B'
+    elif num_bytes < BytesSizeDecimalEnum.MEGABYTE.value:
+        size = num_bytes / BytesSizeDecimalEnum.KILOBYTE.value
+        suffix = 'kB'
+    elif num_bytes < BytesSizeDecimalEnum.GIGABYTE.value:
+        size = num_bytes / BytesSizeDecimalEnum.MEGABYTE.value
+        suffix = 'MB'
+    elif num_bytes < BytesSizeDecimalEnum.TERABYTE.value:
+        size = num_bytes / BytesSizeDecimalEnum.GIGABYTE.value
+        suffix = 'GB'
+    elif num_bytes < BytesSizeDecimalEnum.PETABYTE.value:
+        size = num_bytes / BytesSizeDecimalEnum.TERABYTE.value
+        suffix = 'TB'
+    elif num_bytes < BytesSizeDecimalEnum.EXABYTE.value:
+        size = num_bytes / BytesSizeDecimalEnum.PETABYTE.value
+        suffix = 'PB'
+    elif num_bytes < BytesSizeDecimalEnum.ZETTABYTE.value:
+        size = num_bytes / BytesSizeDecimalEnum.EXABYTE.value
+        suffix = 'EB'
+    elif num_bytes < BytesSizeDecimalEnum.YOTTABYTE.value:
+        size = num_bytes / BytesSizeDecimalEnum.ZETTABYTE.value
+        suffix = 'ZB'
+    else:
+        size = num_bytes / BytesSizeDecimalEnum.YOTTABYTE
+        suffix = 'YB'
+    return f'{size:.2f} {suffix}', size_is_approximate(size)
+
+
+def get_human_readable_size_str_from_bytes_iec_prefix(num_bytes):
+    suffix = ''
+    size_str = 'invalid'
+    if num_bytes < 0:
+        return size_str
+    elif num_bytes < BytesSizeBinaryEnum.KIBIBYTE.value:
+        size = num_bytes
+        suffix = 'B'
+    elif num_bytes < BytesSizeBinaryEnum.MEBIBYTE.value:
+        size = num_bytes / BytesSizeBinaryEnum.KIBIBYTE.value
+        suffix = 'KiB'
+    elif num_bytes < BytesSizeBinaryEnum.GIBIBYTE.value:
+        size = num_bytes / BytesSizeBinaryEnum.MEBIBYTE.value
+        suffix = 'MiB'
+    elif num_bytes < BytesSizeBinaryEnum.TEBIBYTE.value:
+        size = num_bytes / BytesSizeBinaryEnum.GIBIBYTE.value
+        suffix = 'GiB'
+    elif num_bytes < BytesSizeBinaryEnum.PEBIBYTE.value:
+        size = num_bytes / BytesSizeBinaryEnum.TEBIBYTE.value
+        suffix = 'TiB'
+    elif num_bytes < BytesSizeBinaryEnum.EXBIBYTE.value:
+        size = num_bytes / BytesSizeBinaryEnum.PEBIBYTE.value
+        suffix = 'PiB'
+    elif num_bytes < BytesSizeBinaryEnum.ZEBIBYTE.value:
+        size = num_bytes / BytesSizeBinaryEnum.EXBIBYTE.value
+        suffix = 'EiB'
+    elif num_bytes < BytesSizeBinaryEnum.YOBIBYTE.value:
+        size = num_bytes / BytesSizeBinaryEnum.ZEBIBYTE.value
+        suffix = 'ZiB'
+    else:
+        size = num_bytes / BytesSizeBinaryEnum.YOBIBYTE.value
+        suffix = 'YiB'
+    return f'{size:.2f} {suffix}', size_is_approximate(size)
+
+
+def get_bytes_suffix(size):
+    if size < 0:
+        return '?'
+    elif size == 1:
+        return 'byte'
+    else:
+        return 'bytes'
+
+
+def get_init_file_text(hart_count):
+    init_file_txt = '.section .init\n'
+    init_file_txt += '.global _start\n'
+    init_file_txt += '_start:\n'
+    for i in range(0, hart_count):
+        init_file_txt += '\taddi  zero,zero,0\n'
+        init_file_txt += '\taddi  zero,zero,0\n'
+        init_file_txt += '\taddi  zero,zero,0\n'
+        init_file_txt += f'\tj hart{i}\n'
+    return init_file_txt
+
+
+def get_hart_entry_function_text(hart_count, stack_addr, stack_size):
+    hart_entry_text = ''
+    stack_ptr = stack_addr
+    for i in range(0, hart_count):
+        hart_entry_text += HART_ENTRY_POINT_TEMPLATE.format(
+            hart_id=i,
+            stack_address=stack_ptr,
+            entry_point='main' if i == 0 else f'hart{i}_main'
+        )
+        stack_ptr += stack_size
+    return hart_entry_text
+
+
+def linker_is_invoked(gcc_args):
+    return not ('-c' in gcc_args or '-E' in gcc_args or '-S' in gcc_args)
+
+
+def call_program(program_path, program_args):
+    try:
+        return {
+            'success': True,
+            'output': subprocess.check_output(
+                [program_path] + program_args,
+                stderr=subprocess.STDOUT
+            ).decode('ascii')
+        }
+    except subprocess.CalledProcessError as e:
+        return {
+            'success': False,
+            'output': e.output.decode('ascii')
+        }
+
+
+def is_a_compilation_target_file_arg(arg):
+    if os.path.exists(arg):
+        basename = os.path.basename(arg)
+        ext = basename.split('.')[-1]
+        return ext in GCC_KNOWN_FILE_EXTENSIONS
+    else:
+        return False
+
+
+def get_first_compilation_target_index(gcc_args):
+    for i in range(0, len(gcc_args)):
+        if is_a_compilation_target_file_arg(gcc_args[i]):
+            return i
+    return -1
+
+
+def get_last_compilation_target_index(gcc_args):
+    for i in reversed(range(0, len(gcc_args))):
+        if is_a_compilation_target_file_arg(gcc_args[i]):
+            return i
+    return -1
+
+
+def extract_library_arguments(gcc_args):
+    found_library_args = []
+    patched_library_args = []
+    for arg in gcc_args:
+        match1 = library_fmt_one.match(arg)
+        match2 = library_fmt_two.match(arg)
+        lib_name = None
+        if match1:
+            lib_name = match1.groupdict()['library']
+        elif match2:
+            lib_name = match2.groupdict()['library']
+        if lib_name:
+            found_library_args.append(arg)
+            patched_library_args.append(
+                f'-Wl,-l{lib_name}'
+            )
+    return found_library_args, patched_library_args
+
+
+def get_unique(seq):
+    seen = set([])
+    seen_add = seen.add
+    return [x for x in seq if not (x in seen or seen_add(x))]
+
+
+def get_library_name_as_linker_argument(lib_name):
+    if len(lib_name) > 3 and lib_name[0:3] == 'lib':
+        lib_name_fmt = lib_name[3:].replace('.a', '')
+    else:
+        lib_name_fmt = lib_name.replace('.a', '')
+    return lib_name_fmt
+
+
+def get_gcc_patched_argument_list(gcc_args, start_address, libgloss_name, include_init_fini):
+    gcc_new_args = gcc_args
+    first_index = get_first_compilation_target_index(gcc_args)
+    if include_init_fini:
+        gcc_new_args.insert(first_index, INIT_FILE_PATH)
+        first_index += 1
+    gcc_new_args.insert(first_index, ARCH_PARAMS_PATH)
+    first_index += 1
+    gcc_new_args.insert(first_index, HARTS_FILE_PATH)
+    first_index += 1
+    if include_init_fini:
+        gcc_new_args.insert(first_index, FINI_FILE_PATH)
+    old_lib_args, new_lib_args = extract_library_arguments(gcc_new_args)
+    for old_lib_arg in old_lib_args:
+        gcc_new_args.remove(old_lib_arg)
+    last_index = get_last_compilation_target_index(gcc_new_args)
+    last_index += 1
+    gcc_new_args.insert(last_index, '-Wl,--start-group')
+    last_index += 1
+    new_lib_args += ['-Wl,-lgcc', '-Wl,-lc']
+    for new_lib_arg in new_lib_args:
+        gcc_new_args.insert(last_index, new_lib_arg)
+        last_index += 1
+    if libgloss_name:
+        libgloss_fixed_name = get_library_name_as_linker_argument(libgloss_name)
+        gcc_new_args.insert(last_index, f'-Wl,-l{libgloss_fixed_name}')
+        last_index += 1
+    gcc_new_args.insert(last_index, '-Wl,--end-group')
+    gcc_new_args.insert(0, '-nostartfiles')
+    gcc_new_args.insert(0, '-nostdlib')
+    start_address_hex = f'{f"0x{start_address:04x}"}'
+    gcc_new_args.append(f'-Wl,--section-start=.init={start_address_hex}')
+    gcc_new_args.append(f'-Wl,-T{LINKER_SCRIPT_PATH}')
+    return get_unique(gcc_new_args)
+
+
+def get_output_file_path(gcc_args):
+    try:
+        output_index = gcc_args.index('-o')
+        if output_index + 1 <= len(gcc_args) - 1:
+            return gcc_args[output_index + 1]
+    except ValueError:
+        return os.path.join(os.getcwd(), 'a.out')
+    return None
+
+
+def generate_trireme_compilation_files(num_cores, stack_addr, stack_size, arch_params):
+    with open(INIT_FILE_PATH, mode='wb') as out_fh:
+        out_fh.write(get_init_file_text(num_cores).encode('ascii'))
+    with open(HARTS_FILE_PATH, mode='wb') as out_fh:
+        out_fh.write(get_hart_entry_function_text(
+            num_cores,
+            stack_addr,
+            stack_size
+        ).encode('ascii'))
+    with open(FINI_FILE_PATH, mode='wb') as out_fh:
+        out_fh.write(BACKEND_BLOCK.encode('ascii'))
+    with open(ARCH_PARAMS_PATH, mode='wb') as out_fh:
+        out_fh.write(get_arch_params_file_contents(arch_params).encode('ascii'))
+
+
+def generate_vmh_file(compile_path, vmh_path):
+    result = call_program(
+        RISCV_OBJCOPY,
+        ['-O', 'verilog',
+         '--set-section-flags',
+         '.bss=alloc,load,contents',
+         '--set-section-flags',
+         '.sbss=alloc,load,contents',
+         compile_path, vmh_path]
+    )
+    if result['success']:
+        call_program('chmod', ['-x', vmh_path])
+    return result
+
+
+def generate_dump_file(compile_path, dump_path):
+    result = call_program(
+        RISCV_OBJ_DUMP,
+        ['-d', '-Mno-aliases', compile_path]
+    )
+    if result['success']:
+        with open(dump_path, mode='wb') as out_fh:
+            out_fh.write(
+                result['output'].encode('ascii')
+            )
+        call_program('chmod', ['-x', dump_path])
+    return result
+
+
+def generate_raw_binary_file(compile_path, binary_path):
+    result = call_program(
+        RISCV_OBJCOPY,
+        ['-O', 'binary', compile_path, binary_path]
+    )
+    if result['success']:
+        call_program('chmod', ['-x', binary_path])
+    return result
+
+
+def can_parse_int(string):
+    try:
+        int(string)
+        return True
+    except ValueError:
+        return False
+
+
+def update_program_size_dict(line_parts_1, line_parts_2, size_dict):
+    parts_1 = [x for x in line_parts_1 if x != '']
+    parts_2 = [x for x in line_parts_2 if x != '']
+    section_id = parts_1[0]
+    section_name = parts_1[1]
+    section_size = int(parts_1[2], 16)
+    section_vma = int(parts_1[3], 16)
+    section_lma = int(parts_1[4], 16)
+    section_file_offset = int(parts_1[5], 16)
+    section_alignment = parts_1[6]
+    section_loaded = True if len(parts_2) >= 3 and parts_2[2] == 'LOAD,' else False
+    size_dict[section_name] = {
+        'section_id': section_id,
+        'section_size': section_size,
+        'section_vma': section_vma,
+        'section_lma': section_lma,
+        'section_file_offset': section_file_offset,
+        'section_alignment': section_alignment,
+        'section_loaded': section_loaded
+    }
+
+
+def get_program_size_dict(raw_string):
+    size_dict = {}
+    line_index = 0
+    string_lines = raw_string.split('\n')
+    while True:
+        line = string_lines[line_index]
+        line_parts_1 = line.split(' ')
+        if len(line_parts_1) > 3 and can_parse_int(line_parts_1[2]):
+            line_parts_2 = string_lines[line_index+1].split(' ')
+            update_program_size_dict(line_parts_1, line_parts_2, size_dict)
+            line_index += 1
+        line_index += 1
+        if line_index >= len(string_lines):
+            break
+    return size_dict
+
+
+def get_program_total_load_size(size_report):
+    size = 0
+    for section, data in size_report.items():
+        if data['section_loaded'] or 'bss' in section:
+            size += data['section_size']
+    return size
+
+
+def get_program_size_report(compile_path):
+    result = call_program(
+        RISCV_OBJ_DUMP,
+        ['--section-headers', compile_path]
+    )
+    if result['success']:
+        return get_program_size_dict(result['output'])
+    else:
+        return None
+
+
+def do_clean_up():
+    if os.path.exists(INIT_FILE_PATH):
+        os.unlink(INIT_FILE_PATH)
+    if os.path.exists(HARTS_FILE_PATH):
+        os.unlink(HARTS_FILE_PATH)
+    if os.path.exists(FINI_FILE_PATH):
+        os.unlink(FINI_FILE_PATH)
+    if os.path.exists(LINKER_SCRIPT_PATH):
+        os.unlink(LINKER_SCRIPT_PATH)
+    if os.path.exists(ARCH_PARAMS_PATH):
+        os.unlink(ARCH_PARAMS_PATH)
+    if os.path.exists(TEMP_BASE_DIRECTORY):
+        os.rmdir(TEMP_BASE_DIRECTORY)
+
+
+def adjust_vmh_addresses(vmh_path, address_width=1, output_path=None):
+    if output_path is None:
+        output_path = vmh_path
+    output_lines = ''
+    with open(vmh_path) as in_fh:
+        for line in in_fh:
+            if line[0] == '@':
+                address_str = line[1:].rstrip()
+                address_int = int(address_str, 16)
+                new_address = address_int / address_width
+                sign, digits, exponent = decimal.Decimal(new_address).as_tuple()
+                if exponent != 0:
+                    print(f'trireme WARNING: address {address_str} is not '
+                          f'aligned on a {address_width} byte word boundary')
+                new_address_str = f'{f"{int(new_address):08x}"}'
+                output_lines += f'@{new_address_str}\n'
+            else:
+                output_lines += line
+    with open(output_path, mode='w') as out_fh:
+        for line in output_lines:
+            out_fh.write(line)
+
+
+def adjust_vmh_data_width(vmh_path, output_path=None, width=4):
+    width *= 2
+    with open(vmh_path) as in_fh:
+        lines = in_fh.readlines()
+    modified = []
+    for line in lines:
+        if line[0] == '@':
+            modified.append(line)
+            continue
+        container = ''
+        modified_line = ''
+        for character in ''.join(line.split(' ')):
+            container += character
+            if len(container) % width == 0:
+                # Construct a list of character pairs each representing a byte
+                bytes_list = list(zip(container[0::2], container[1::2]))
+                # Reverse the list and flatten the list of pairs into an
+                # one-dimensional list
+                flatten = [nibble for byte in bytes_list[::-1] for nibble in byte]
+                modified_line += ''.join(flatten) + ' '
+                container = ''
+        modified.append(modified_line.strip() + '\n')
+    if output_path is None:
+        output_path = vmh_path
+    with open(output_path, 'w') as out_fh:
+        out_fh.writelines(modified)
+
+
+def generate_linker_script(heap_size, ram_origin, ram_size,
+                           output_path, bsp_lib_path, gcc_version,
+                           include_init_fini, data_width_bits=32):
+    linker_script_content = LINKER_SCRIPT.format(
+        heap_size=heap_size,
+        ram_size=ram_size,
+        ram_origin=ram_origin,
+        data_width=data_width_bits,
+        bsp_lib_path=bsp_lib_path,
+        gcc_version=gcc_version,
+        fini_section=LINKER_FINI_SECTION if include_init_fini else '',
+        init_section=LINKER_INIT_SECTION.format(data_width=data_width_bits) if include_init_fini else ''
+    )
+    with open(output_path, mode='w') as out_fh:
+        out_fh.write(linker_script_content)
+
+
+def get_iec_human_readable_string_formatted(size):
+    size_is_negative = size < 0
+    size_str, is_approximate = get_human_readable_size_str_from_bytes_iec_prefix(abs(size))
+    if is_approximate:
+        return f'{APPROX_EQUALS} ({"-" if size_is_negative else ""}{size_str})'
+    else:
+        return f'({"-" if size_is_negative else ""}{size_str})'
+
+
+def print_compilation_summary(script_args, program_path, arch_params, gen_map):
+    stack_total_size = script_args['stack_size'] * script_args['num_cores']
+    size_report = get_program_size_report(program_path)
+    nm_output = get_nm_output_dict(program_path)
+    nm_end = nm_output['_end']['value']
+    heap_begin_addr = nm_end
+    heap_end_addr = heap_begin_addr + script_args['heap_size']
+    heap_begin_addr_str = f'{f"0x{heap_begin_addr:04x}"}'
+    heap_end_add_str = f'{f"0x{heap_end_addr:04x}"}'
+    free_space_size = (script_args['stack_addr'] - script_args['stack_size']) - heap_end_addr
+    start_addr = script_args['start_addr']
+    start_addr_hex = f'{f"0x{start_addr:04x}"}'
+    stack_start_addr = script_args['stack_addr']
+    stack_end_addr = script_args['stack_addr'] - script_args['stack_size']
+    program_load_size = get_program_total_load_size(size_report)
+    summary_str = f'\tnumber of cores: {script_args["num_cores"]}\n'
+    summary_str += f'\tprogram path: {program_path}\n'
+    if gen_map['vmh']:
+        summary_str += f'\tvmh path: {gen_map["vmh"]}\n'
+    if gen_map['binary']:
+        summary_str += f'\traw binary path: {gen_map["binary"]}\n'
+    if gen_map["dump"]:
+        summary_str += f'\tobjdump output path: {gen_map["dump"]}\n'
+    if len(arch_params) > 0:
+        summary_str += '\tarchitecture params:\n'
+        for param_no, param_name in enumerate(arch_params.keys()):
+            if isinstance(value, str):
+                value_str = f'"{arch_params[param_name]}"'
+            else:
+                value_str = hex(arch_params[param_name])
+            summary_str += f'\t {param_no+1}. {name}: {value_str}\n'
+    summary_str += f'\tstart address: {start_addr:,} (hex: {start_addr_hex})\n'
+    summary_str += f'\tstart address on word boundary? {YES_IN_GREEN if start_addr % 4 == 0 else NO_IN_RED}\n'
+    summary_str += f'\tprogram size: {heap_begin_addr:,} ' \
+                   f'{get_bytes_suffix(heap_begin_addr)} ' \
+                   f'{get_iec_human_readable_string_formatted(heap_begin_addr)}\n'
+    summary_str += f'\tcore stack size: {script_args["stack_size"]:,} ' \
+                   f'{get_bytes_suffix(script_args["stack_size"])} ' \
+                   f'{get_iec_human_readable_string_formatted(script_args["stack_size"])}\n'
+    cores_stack_start_ptr = stack_start_addr
+    cores_stack_end_ptr = stack_end_addr
+    for i in range(0, script_args['num_cores']):
+        stack_start_addr_hex = f'{f"0x{cores_stack_start_ptr:04x}"}'
+        stack_end_addr_hex = f'{f"0x{cores_stack_end_ptr:04x}"}'
+        summary_str += f'\tcore {i} stack start address: {cores_stack_start_ptr:,} (hex: {stack_start_addr_hex})\n'
+        summary_str += f'\tcore {i} stack end address: {cores_stack_end_ptr:,} (hex: {stack_end_addr_hex})\n'
+        summary_str += f'\tcore {i} stack start address is 16-byte aligned? ' \
+                       f'{YES_IN_GREEN if cores_stack_start_ptr % 16 == 0 else NO_IN_RED}\n'
+        summary_str += f'\tcore {i} stack end address is word aligned? ' \
+                       f'{YES_IN_GREEN if cores_stack_end_ptr % 4 == 0 else NO_IN_RED}\n'
+        cores_stack_start_ptr += script_args['stack_size']
+        cores_stack_end_ptr += script_args['stack_size']
+    final_stack_start_addr = cores_stack_start_ptr - script_args['stack_size']
+    summary_str += f'\ttotal stack size: {stack_total_size:,} ' \
+                   f'{get_bytes_suffix(stack_total_size)} ' \
+                   f'{get_iec_human_readable_string_formatted(stack_total_size)}\n'
+    summary_str += f'\theap start address: {heap_begin_addr:,} (hex: {heap_begin_addr_str})\n'
+    summary_str += f'\theap end address: {heap_end_addr:,} (hex: {heap_end_add_str})\n'
+    summary_str += f'\theap start address is word aligned? ' \
+                   f'{YES_IN_GREEN if heap_begin_addr % 4 == 0 else NO_IN_RED}\n'
+    summary_str += f'\theap end address is word aligned? ' \
+                   f'{YES_IN_GREEN if heap_end_addr % 4 == 0 else NO_IN_RED}\n'
+    summary_str += f'\theap size: {script_args["heap_size"]:,} ' \
+                   f'{get_bytes_suffix(script_args["heap_size"])} ' \
+                   f'{get_iec_human_readable_string_formatted(script_args["heap_size"])}\n'
+    # assume heap always at the end
+    stack_end_overlaps_program = stack_end_addr < heap_end_addr
+    stack_start_overlaps_program = final_stack_start_addr < heap_end_addr
+    stack_fully_overlaps = stack_start_overlaps_program
+    stack_partially_overlaps = stack_end_overlaps_program and not stack_start_overlaps_program
+    stack_out_of_bounds = stack_start_addr > script_args['ram_size']
+    if stack_fully_overlaps:
+        summary_str += f'\t{TERMINAL_RED}Stack region completely overlaps program. ' \
+                       f'Memory corruption will occur.{TERMINAL_FMT_RESET}'
+    if not stack_fully_overlaps and not stack_fully_overlaps and script_args['heap_size'] > 0:
+        heap_stack_gap = stack_end_addr - heap_end_addr
+        summary_str += f'\tstack <--> heap gap: ' \
+                       f'{free_space_size:,} ' \
+                       f'{get_bytes_suffix(abs(heap_stack_gap))} ' \
+                       f'{get_iec_human_readable_string_formatted(heap_stack_gap)}\n'
+    if not stack_fully_overlaps:
+        total_size = stack_start_addr
+        total_size_power_2 = get_nearest_power_of_two(total_size)
+        total_size_power_2_mem_bits = math.ceil(math.log2(total_size_power_2))
+        summary_str += f'\tmemory image total size: {total_size:,} {get_bytes_suffix(total_size)} ' \
+                       f'{get_iec_human_readable_string_formatted(total_size)}\n'
+        user_main_mem_size = script_args['ram_size']
+        summary_str += f'\tuser selected main memory size: {user_main_mem_size:,} ' \
+                       f'{get_bytes_suffix(user_main_mem_size)} ' \
+                       f'{get_iec_human_readable_string_formatted(user_main_mem_size)}\n'
+        summary_str += f'\trecommended main memory size: {total_size_power_2:,} {get_bytes_suffix(total_size_power_2)} ' \
+                       f'{get_iec_human_readable_string_formatted(total_size_power_2)} ' \
+                       f'(address bits: {total_size_power_2_mem_bits})'
+        ram_overflow = user_main_mem_size - total_size
+        if stack_out_of_bounds:
+            summary_str += f'\n\t{TERMINAL_YELLOW}Stack address is outside main memory boundary. ' \
+                           f'Program may not run correctly{TERMINAL_FMT_RESET}'
+        elif stack_partially_overlaps:
+            summary_str += f'\n\t{TERMINAL_YELLOW}Stack region partially overlaps program. ' \
+                           f'Memory corruption may occur.{TERMINAL_FMT_RESET}'
+        if ram_overflow < 0:
+            ram_overflow = abs(ram_overflow)
+            summary_str += f'\n\t{TERMINAL_YELLOW}main memory may be overflowed by {ram_overflow:,} ' \
+                           f'{get_bytes_suffix(ram_overflow)} ' \
+                           f'{get_iec_human_readable_string_formatted(ram_overflow)}{TERMINAL_FMT_RESET}'
+    print(f'trireme: "{os.path.basename(program_path)}" compilation summary')
+    print(summary_str)
+
+
+def get_nearest_power_of_two(value):
+    return 2**math.ceil(math.log2(value))
+
+
+def get_raw_memory_size_needed(script_args):
+    return script_args['stack_addr'] + script_args['stack_size'] * script_args['num_cores']
+
+
+def get_nm_output_dict(compile_path):
+    result = call_program(
+        RISCV_NM,
+        ['-n', compile_path]
+    )
+    symbol_dict = {}
+    if result['success']:
+        for line in result['output'].split('\n'):
+            line_parts = line.split(' ')
+            if len(line_parts) != 3:
+                continue
+            symbol_address = int(line_parts[0], 16)
+            symbol_type_code = line_parts[1]
+            symbol_name = line_parts[2]
+            symbol_dict[symbol_name] = {
+                'value': symbol_address,
+                'type_code': symbol_type_code
+            }
+        return symbol_dict
+    else:
+        print(result['output'])
+        return None
+
+
+def get_correct_output_file_path(compile_path, output_path, ext):
+    path_parts = os.path.split(output_path)
+    if path_parts[-1] == '@default_name':
+        output_path = os.path.join(
+            os.path.dirname(output_path),
+            f'{os.path.basename(compile_path)}{ext}'
+        )
+        return output_path
+    else:
+        return output_path
+
+
+def get_gcc_version():
+    result = call_program(
+        RISCV_GCC,
+        ['--version']
+    )
+    if result['success']:
+        version_line = result['output'].split('\n')[0]
+        line_parts = version_line.split(' ')
+        return line_parts[-1]
+    return None
+
+
+def set_toolchain_paths(prefix):
+    global RISCV_TOOL_CHAIN_PREFIX
+    global RISCV_TOOL_CHAIN_BINARY_PREFIX
+    global RISCV_GCC
+    global RISCV_OBJ_DUMP
+    global RISCV_OBJCOPY
+    global RISCV_SIZE
+    global RISCV_NM
+    RISCV_TOOL_CHAIN_PREFIX = prefix
+    RISCV_TOOL_CHAIN_BINARY_PREFIX = f'{RISCV_TOOL_CHAIN_PREFIX}/bin/riscv32-unknown-elf'
+    RISCV_GCC = f'{RISCV_TOOL_CHAIN_BINARY_PREFIX}-gcc'
+    RISCV_OBJ_DUMP = f'{RISCV_TOOL_CHAIN_BINARY_PREFIX}-objdump'
+    RISCV_OBJCOPY = f'{RISCV_TOOL_CHAIN_BINARY_PREFIX}-objcopy'
+    RISCV_SIZE = f'{RISCV_TOOL_CHAIN_BINARY_PREFIX}-size'
+    RISCV_NM = f'{RISCV_TOOL_CHAIN_BINARY_PREFIX}-nm'
+
+
+def main(script_args, gcc_args):
+    set_toolchain_paths(script_args['toolchain_prefix'])
+    if script_args['verbose']:
+        print('trireme: dumping arguments..')
+        print(f'program args: {pprint.pformat(script_args)}')
+        print(f'gcc args {pprint.pformat(gcc_args)}')
+    if not os.path.exists(TEMP_BASE_DIRECTORY):
+        os.makedirs(TEMP_BASE_DIRECTORY, exist_ok=True)
+
+    num_src_file_args = len(
+        list(filter(lambda x: is_a_compilation_target_file_arg(x), gcc_args))
+    )
+    if script_args['verbose']:
+        print(f'trireme: detected {num_src_file_args} source file(s)')
+    if linker_is_invoked(gcc_args):
+        ram_size_needed = get_nearest_power_of_two(
+            get_raw_memory_size_needed(script_args)
+        )
+        gcc_version = get_gcc_version()
+        if gcc_version is None:
+            print('trireme: could not determine gcc version; aborting...')
+            exit(1)
+        generate_linker_script(
+            heap_size=script_args['heap_size'],
+            ram_origin=0,
+            ram_size=script_args['ram_size'],
+            output_path=LINKER_SCRIPT_PATH,
+            bsp_lib_path=script_args['trireme_lib_path'],
+            gcc_version=gcc_version,
+            include_init_fini=not script_args['omit_init_fini']
+        )
+        patched_args = get_gcc_patched_argument_list(gcc_args,
+                                                     script_args['start_addr'],
+                                                     script_args['link_libgloss'],
+                                                     not script_args['omit_init_fini'])
+        if script_args['verbose']:
+            print(f'trireme: patched gcc arguments:{pprint.pformat(patched_args)}')
+        arch_params = {}
+        if script_args['arch_params']:
+            if os.path.exists(script_args['arch_params']):
+                print(f'trireme: parsing params file "{os.path.realpath(script_args["arch_params"])}"')
+                arch_params = get_arch_params_from_file(script_args['arch_params'], DEFAULT_ARCH_PARAMS)
+            else:
+                print(f'trireme: failed to load params file because '
+                      f'"{os.path.realpath(script_args["arch_params"])}" does not exist')
+                arch_params = DEFAULT_ARCH_PARAMS.copy()
+        else:
+            arch_params = DEFAULT_ARCH_PARAMS.copy()
+        generate_trireme_compilation_files(
+            script_args['num_cores'],
+            script_args['stack_addr'],
+            script_args['stack_size'],
+            arch_params
+        )
+        result = call_program(RISCV_GCC, patched_args)
+        if result['output'] != '':
+            print(result['output'])
+        do_clean_up()
+        if result['success']:
+            output_gen_map = {
+                'vmh': None,
+                'binary': None,
+                'dump': None
+            }
+            output_path_file = get_output_file_path(patched_args)
+            if script_args['verbose']:
+                print(f'trireme: detected output file path {output_path_file}')
+            if script_args['vmh']:
+                vmh_path = get_correct_output_file_path(
+                    output_path_file,
+                    script_args['vmh'],
+                    '.vmh'
+                )
+                result = generate_vmh_file(
+                    output_path_file,
+                    vmh_path
+                )
+                if result['success']:
+                    output_gen_map['vmh'] = vmh_path
+                    adjust_vmh_data_width(vmh_path)
+                    adjust_vmh_addresses(vmh_path, 4)
+                else:
+                    print(f'trireme: an error occurred while generating {vmh_path}')
+                    print(result['output'])
+            if script_args['dump']:
+                dump_path = get_correct_output_file_path(
+                    output_path_file,
+                    script_args['dump'],
+                    '.dump'
+                )
+                result = generate_dump_file(
+                    output_path_file,
+                    dump_path
+                )
+                if result['success']:
+                    output_gen_map['dump'] = dump_path
+                else:
+                    print(f'trireme: an error occurred while generating {dump_path}')
+                    print(result["output"])
+            if script_args['raw_binary']:
+                binary_path = get_correct_output_file_path(
+                    output_path_file,
+                    script_args['raw_binary'],
+                    '.bin'
+                )
+                result = generate_raw_binary_file(
+                    output_path_file,
+                    binary_path
+                )
+                if result['success']:
+                    output_gen_map['binary'] = binary_path
+                else:
+                    print(f'trireme: an error occurred while generating {binary_path}')
+                    print(result["output"])
+            print_compilation_summary(script_args, output_path_file, arch_params, output_gen_map)
+        else:
+            print('trireme: compilation aborted')
+            return 1
+    elif not linker_is_invoked(gcc_args):
+        print('trireme: linker is not invoked, forwarding arguments...')
+        result = call_program(RISCV_GCC, gcc_args)
+        print(result['output'])
+        return 0 if result['success'] else 1
+    else:
+        print('trireme: compilation aborted')
+        return 1
+    return 0
+
+
+def parse_integer_arg(string):
+    try:
+        val = int(string)
+        if val >= 0:
+            return val
+        else:
+            raise argparse.ArgumentError(f'{val} is a negative number')
+    except ValueError:
+        raise argparse.ArgumentError(f'{string} is not an integer')
+
+
+def parse_stack_size_arg(string):
+    size = parse_integer_arg(string)
+    if size < DEFAULT_STACK_SIZE:
+        raise argparse.ArgumentError(f'{size} is less than min stack size ({DEFAULT_STACK_SIZE})')
+    return size
+
+
+def get_arch_params_file_contents(arch_params):
+    asm_constants = []
+    work_dict = arch_params.copy()
+    for key, value in DEFAULT_ARCH_PARAMS.items():
+        if key not in arch_params:
+            work_dict[key] = value
+    for key, value in work_dict.items():
+        if isinstance(value, str):
+            value_trans = f'"{value}"'
+            type_str = '.string'
+        else:
+            value_trans = hex(value)
+            type_str = '.word'
+        asm_constants.append(
+            ASM_CONSTANT_TEMPLATE.format(
+                name=key,
+                type=type_str,
+                value=value_trans
+            )
+        )
+    asm_constants_flat = ''.join(asm_constants)
+    return asm_constants_flat
+
+
+def get_arch_params_from_file(file_path, default_params):
+    params = default_params.copy()
+    try:
+        with open(file_path, mode='r') as in_fh:
+            for line_no, line in enumerate(in_fh):
+                line_split = line.rstrip().split(':')
+                value = None
+                try:
+                    value = int(line_split[1], 10)
+                except ValueError:
+                    value = None
+                if value is None:
+                    try:
+                        value = int(line_split[1], 16)
+                    except ValueError:
+                        value = None
+                if value is None:
+                    value = line_split[1]
+                params[line_split[0]] = value
+    except Exception as e:
+        print(f'trireme: an unexpected error occurred while parsing {file_path}: {e}')
+    return params
+
+
+if __name__ == '__main__':
+    arg_parser = argparse.ArgumentParser(
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=textwrap.dedent('''\
+             GCC Arguments
+                 Arguments for the GNU Compiler Collection Frontend can be intermixed with arguments for this script
+                 Therefore you may place them anywhere within the command line
+                 For example these are equivalent: 
+                    ./trireme_gcc foo.c bar.c -o foo_bar.elf --vmh foo_bar.vmh
+                    ./trireme_gcc foo.c --vmh foo_bar.vmh bar.c -o foo_bar.elf
+                 Note that the order of GCC commands still matter!
+             ''')
+    )
+    arg_parser.add_argument(
+        '--vmh',
+        help=(
+            'Output .vmh memory image file. Argument is full path of the file. '
+            f'Note you can specify @default_name if you wish to derive the name from the compilation output name. '
+            f'For example: ./trireme_gcc foo.c -o foo --vmh /tmp/@default_name will generate /tmp/foo.vmh'
+        ),
+        type=str,
+        metavar='FILE_PATH'
+    )
+    arg_parser.add_argument(
+        '--dump',
+        help=(
+            'Save output of objdump in a .dump file. Argument is full path of the file. '
+            f'Note you can specify @default_name if you wish to derive the name from the compilation output name. '
+            f'For example: ./trireme_gcc foo.c -o foo --dump /tmp/@default_name will generate /tmp/foo.dump'
+        ),
+        metavar='FILE_PATH',
+        type=str
+    )
+    arg_parser.add_argument(
+        '--num-cores',
+        help=(
+            'Number of harts for the TRIREME processor target (default: 1)'
+        ),
+        type=parse_integer_arg,
+        default=1
+    )
+    arg_parser.add_argument(
+        '--stack-addr',
+        help=(
+            f'Stack address of Core 0 (default: {DEFAULT_STACK_ADDRESS})'
+        ),
+        type=parse_integer_arg,
+        default=DEFAULT_STACK_ADDRESS
+    )
+    arg_parser.add_argument(
+        '--start-addr',
+        help=(
+            f'Start address of program (default: {DEFAULT_START_ADDRESS})'
+        ),
+        type=parse_integer_arg,
+        default=DEFAULT_START_ADDRESS
+    )
+    arg_parser.add_argument(
+        '--raw-binary',
+        help=(
+            f'Dump raw binary of program (strips away elf headers). Argument is full path of the file. '
+            f'Note you can specify @default_name if you wish to derive the name from the compilation output name. '
+            f'For example: ./trireme_gcc foo.c -o foo --raw-binary /tmp/@default_name will generate /tmp/foo.bin'
+        ),
+        type=str,
+        metavar='FILE_PATH'
+    )
+    arg_parser.add_argument(
+        '--heap-size',
+        help=(
+            'Size of the heap (default: 0)'
+        ),
+        type=parse_integer_arg,
+        default=0
+    )
+    arg_parser.add_argument(
+        '--stack-size',
+        help=(
+            f'Stack size for each hart. '
+            'Note that the stack size does not change during runtime. '
+            f'(default: {DEFAULT_STACK_SIZE})'
+        ),
+        type=parse_integer_arg,
+        default=DEFAULT_STACK_SIZE
+    )
+    arg_parser.add_argument(
+        '--link-libgloss',
+        help=(
+            f'Link the specified Board Support Package (BSP). '
+            f'Argument is the library name. If this is not specified the script will '
+            f'not tell the linker to include a BSP (example: libnosys_trireme32)'
+        ),
+        default=None
+    )
+    arg_parser.add_argument(
+        '--ram-size',
+        help=(
+            f'Size of main memory in bytes (default: {DEFAULT_MAIN_MEMORY_SIZE})'
+        ),
+        type=parse_integer_arg,
+        default=DEFAULT_MAIN_MEMORY_SIZE
+    )
+    arg_parser.add_argument(
+        '--trireme-lib-path',
+        help=(
+            f'Path to TRIREME specific libraries such as libgloss (default: {TRIREME_DEFAULT_LIB_PATH})'
+        ),
+        default=TRIREME_DEFAULT_LIB_PATH
+    )
+    arg_parser.add_argument(
+        '--verbose',
+        help=(
+            f'Print debug information'
+        ),
+        default=False,
+        action='store_true'
+    )
+    arg_parser.add_argument(
+        '--toolchain-prefix',
+        help=(
+            f'Install path of RISC-V toolchain (default: {RISCV_TOOL_CHAIN_PREFIX})'
+        ),
+        default=RISCV_TOOL_CHAIN_PREFIX
+    )
+    arg_parser.add_argument(
+        '--omit-init-fini',
+        help=(
+            'Do not include .init and .fini sections. '
+            '.init section has been repurposed to act as the program entry point '
+            '.fini section has been repurposed to act as a simple infinite loop that can be used to catch a stray PC'
+        ),
+        action='store_true',
+        default=False
+    )
+    default_params_list = []
+    for name, value in DEFAULT_ARCH_PARAMS.items():
+        if isinstance(value, str):
+            default_params_list.append(
+                f'{name}: "{value}"'
+            )
+        else:
+            default_params_list.append(
+                f'{name}: {hex(value)}'
+            )
+    arg_parser.add_argument(
+        '--arch-params',
+        metavar='FILE_PATH',
+        help=(
+            'Path to the file containing architecture specific parameters. '
+            'Each line stores key/value pairs that are delimited by a colon. '
+            'Note that only words and strings can be specified at this time. '
+            f'Examples: foo: 0x400. Default parameters: '
+            f'({",  ".join(default_params_list)})'
+        )
+    )
+    if len(sys.argv) == 1:
+        arg_parser.print_help()
+    else:
+        args, unknown_args = arg_parser.parse_known_args()
+        main(vars(args), unknown_args)
