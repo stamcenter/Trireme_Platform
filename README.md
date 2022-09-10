@@ -1,4 +1,4 @@
-# Trireme
+# trireme
 The Trireme RISC-V Design Platform is a complete RISC-V design space exploration exploration environment. It allows researchers and design engineers to bring up a customized instance of RISC-V system using the provided design automation tools, soft parameterizable hardware modules, and the software ecosystem for application development and compiling. The systems supported range from ultra-low-power microcontrollers to high-performance multi-core processors.
 
 All parts of the platform are open-source and available for download at https://www.trireme-riscv.org/index.html
